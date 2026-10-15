@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Konverter Teks & Gambar</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+*{box-sizing:border-box; margin:0; padding:0; font-family:system-ui, sans-serif;}
+body{max-width:600px; margin:2rem auto; padding:0 1rem; background:#f8f9fa;}
+.card{background:#fff; padding:2rem; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,.08);}
+h1{text-align:center; color:#1a1a1a; margin-bottom:2rem; font-size:1.5rem;}
+.zone{border:2px dashed #4f46e5; border-radius:12px; padding:1.5rem; text-align:center; cursor:pointer; margin-bottom:1rem; transition:.2s;}
+.zone:hover{background:#eef2ff;}
+.zone-img{border-color:#10b981;}
+.zone-img:hover{background:#f0fdf4;}
+.label-box{margin-bottom:1.2rem;}
+label{font-weight:500; color:#374151; display:block; margin-bottom:.5rem;}
+select, button{width:100%; padding:.9rem; border-radius:8px; border:1px solid #ddd; font-size:1rem; margin-bottom:1rem;}
+button{background:#4f46e5; color:#fff; border:none; font-weight:600; cursor:pointer;}
+button:active{background:#4338ca;}
+#status{margin-top:1rem; padding:1rem; border-radius:8px; display:none;}
+.success{background:#dcfce7; color:#166534; display:block !important;}
+.info{background:#e0f2fe; color:#075985; display:block !important;}
+.error{background:#fee2e2; color:#991b1b; display:block !important;}
+.file-info{font-size:.9rem; color:#6b7280; margin-top:.5rem; line-height:1.5;}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🔄 Konverter Teks & Gambar</h1>
+
+  <div class="label-box">
+    <label>📄 File Teks (Opsional)</label>
+    <div class="zone" id="zoneText">
+      <strong>Klik Pilih File Teks</strong><br>
+      <small>.txt, .md, .html — boleh dikosongkan</small>
+      <input type="file" id="fileText" accept=".txt,.md,.html" style="display:none;">
+    </div>
+    <div class="file-info" id="infoText"></div>
+  </div>
+
+  <div class="label-box">
+    <label>🖼️ Gambar (Opsional)</label>
+    <div class="zone zone-img" id="zoneImg">
+      <strong>Klik Pilih Gambar</strong><br>
+      <small>.jpg, .png, .webp — tidak terpotong!</small>
+      <input type="file" id="fileImg" accept="image/*" style="display:none;">
+    </div>
+    <div class="file-info" id="infoImg"></div>
+  </div>
+
+  <label>Ubah Menjadi:</label>
+  <select id="outputFormat">
+    <option value="pdf">📄 PDF (.pdf)</option>
+    <option value="txt">📝 Teks (.txt)</option>
+    <option value="html">🌐 HTML (.html)</option>
+  </select>
+
+  <button id="convertBtn">✨ Konversi & Unduh</button>
+  <div id="status"></div>
+</div>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+const zoneText = document.getElementById('zoneText');
+const fileText = document.getElementById('fileText');
+const infoText = document.getElementById('infoText');
+const zoneImg = document.getElementById('zoneImg');
+const fileImg = document.getElementById('fileImg');
+const infoImg = document.getElementById('infoImg');
+const outputFormat = document.getElementById('outputFormat');
+const convertBtn = document.getElementById('convertBtn');
+const status = document.getElementById('status');
+
+let textFile = null;
+let imgFile = null;
+let textContent = '';
+let imgDataUrl = null;
+
+// Pilih File Teks
+zoneText.addEventListener('click', () => fileText.click());
+fileText.addEventListener('change', async e => {
+  if (e.target.files.length) {
+    textFile = e.target.files[0];
+    textContent = await textFile.text();
+    infoText.innerHTML = '✅ <b>' + textFile.name + '</b> (' + (textFile.size/1024).toFixed(1) + ' KB)';
+  } else {
+    textFile = null;
+    textContent = '';
+    infoText.innerHTML = '';
+  }
+});
+
+// Pilih Gambar
+zoneImg.addEventListener('click', () => fileImg.click());
+fileImg.addEventListener('change', async e => {
+  if (e.target.files.length) {
+    imgFile = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = evt => {
+      imgDataUrl = evt.target.result;
+      infoImg.innerHTML = '✅ <b>' + imgFile.name + '</b> (' + (imgFile.size/1024).toFixed(1) + ' KB)';
+    };
+    reader.readAsDataURL(imgFile);
+  } else {
+    imgFile = null;
+    imgDataUrl = null;
+    infoImg.innerHTML = '';
+  }
+});
+
+// Fungsi potong teks biar muat di PDF
+function wrapText(doc, text, maxWidth) {
+  const words = text.split(' ');
+  let lines = [];
+  let currentLine = words[0] || '';
+  for (let i = 1; i < words.length; i++) {
+    const testLine = currentLine + ' ' + words[i];
+    if (doc.getTextWidth(testLine) > maxWidth) {
+      lines.push(currentLine);
+      currentLine = words[i];
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
+convertBtn.addEventListener('click', async () => {
+  // Minimal salah satu harus dipilih
+  if (!textFile && !imgFile) {
+    showStatus('⚠️ Pilih file teks ATAU gambar dulu! Minimal salah satu.', 'error');
+    return;
+  }
+
+  const format = outputFormat.value;
+  const fileName = textFile ? textFile.name.replace(/\.[^/.]+$/, '') : 'Gambar';
+
+  if (format === 'pdf') {
+    showStatus('⏳ Sedang membuat PDF...', 'info');
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const maxWidth = pageWidth - margin * 2;
+    const lineHeight = 5.5;
+    let y = 20;
+
+    // Tulis teks kalau ada
+    if (textFile) {
+      const paragraphs = textContent.split('\n');
+      paragraphs.forEach(para => {
+        if (y > 280) { doc.addPage(); y = 20; }
+        if (para.trim() === '') {
+          y += lineHeight;
+          return;
+        }
+        const lines = wrapText(doc, para, maxWidth);
+        lines.forEach(line => {
+          if (y > 280) { doc.addPage(); y = 20; }
+          doc.text(line, margin, y);
+          y += lineHeight;
+        });
+      });
+    }
+
+    // Tambah gambar kalau ada — DIPERBAIKI BIAR TIDAK TERPOTONG!
+    if (imgDataUrl) {
+      // Jarak sebelum gambar
+      if (textFile) y += 10;
+      
+      // Cek apakah masih cukup tempat, kalau tidak pindah halaman
+      if (y > 230) { 
+        doc.addPage(); 
+        y = 20; 
+      }
+
+      // ✅ DAPATKAN UKURAN ASLI GAMBAR
+      const imgProps = doc.getImageProperties(imgDataUrl);
+      const imgOrigW = imgProps.width;
+      const imgOrigH = imgProps.height;
+
+      // ✅ SESUAIKAN UKURAN BIAR TIDAK KELUAR DARI HALAMAN
+      let targetW = maxWidth;
+      let targetH = (targetW / imgOrigW) * imgOrigH;
+
+      // Kalau gambar terlalu tinggi, batasi juga tinggi-nya
+      const maxImgHeight = 250;
+      if (targetH > maxImgHeight) {
+        targetH = maxImgHeight;
+        targetW = (targetH / imgOrigH) * imgOrigW;
+      }
+
+      // ✅ TENGAHKAN GAMBAR BIAR RAPI
+      const xPos = margin + (maxWidth - targetW) / 2;
+
+      // ✅ MASUKKAN GAMBAR LENGKAP — TIDAK TERPOTONG!
+      doc.addImage(imgDataUrl, 'JPEG', xPos, y, targetW, targetH);
+    }
+
+    doc.save(fileName + '.pdf');
+    showStatus('✅ Berhasil! Disimpan sebagai ' + fileName + '.pdf', 'success');
+  } else {
+    // TXT / HTML — hanya teks
+    if (!textFile) {
+      showStatus('⚠️ Format Teks/HTML hanya bisa untuk file teks.', 'error');
+      return;
+    }
+    const ext = format === 'txt' ? 'txt' : 'html';
+    const mime = format === 'txt' ? 'text/plain' : 'text/html';
+    const blob = new Blob([textContent], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName + '.' + ext; a.click();
+    URL.revokeObjectURL(url);
+    showStatus('✅ Berhasil! Disimpan sebagai ' + fileName + '.' + ext, 'success');
+  }
+});
+
+function showStatus(msg, type) {
+  status.textContent = msg;
+  status.className = type;
+  status.style.display = 'block';
+}
+</script>
+
+</body>
+</html>
